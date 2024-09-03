@@ -5,24 +5,61 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
 
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+
 import com.google.android.gms.location.ActivityRecognitionResult;
+import com.google.android.gms.location.ActivityTransition;
+import com.google.android.gms.location.ActivityTransitionEvent;
+import com.google.android.gms.location.ActivityTransitionResult;
 import com.google.android.gms.location.DetectedActivity;
 
 public class ActivityRecognitionReceiver extends BroadcastReceiver {
 
+    public static final String ACTION_ACTIVITY_UPDATE = "com.example.myapplication.ACTION_ACTIVITY_UPDATE";
+    public static final String EXTRA_ACTIVITY_MESSAGE = "com.example.myapplication.EXTRA_ACTIVITY_MESSAGE";
+
+
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        Log.e("TAG", "Result : "+ActivityRecognitionResult.hasResult(intent));
-        if (ActivityRecognitionResult.hasResult(intent)) {
-            Log.e("TAG", "if true");
-            ActivityRecognitionResult result = ActivityRecognitionResult.extractResult(intent);
-            DetectedActivity mostProbableActivity = result.getMostProbableActivity();
+        String action = intent.getAction();
+        Log.e("TAG", "Received action: " + action);
+        String message = "";
 
-            String activityStr = getActivityString(mostProbableActivity.getType());
-            int confidence = mostProbableActivity.getConfidence();
+        if ("ACTIVITY_TRANSITION_ACTION".equals(action)) {
+            if (ActivityTransitionResult.hasResult(intent)) {
+                ActivityTransitionResult result = ActivityTransitionResult.extractResult(intent);
+                for (ActivityTransitionEvent event : result.getTransitionEvents()) {
+                    message += "Transition: " + getTransitionType(event.getTransitionType()) +
+                            " for activity: " + getActivityString(event.getActivityType()) + "\n";
+                }
+            }
+        } else if ("ACTIVITY_RECOGNITION_ACTION".equals(action)) {
+            if (ActivityRecognitionResult.hasResult(intent)) {
+                ActivityRecognitionResult result = ActivityRecognitionResult.extractResult(intent);
+                DetectedActivity mostProbableActivity = result.getMostProbableActivity();
+                message = "Activity: " + getActivityString(mostProbableActivity.getType()) +
+                        " Confidence: " + mostProbableActivity.getConfidence() + "%";
 
-            Log.e("TAG", "Activity: " + activityStr + "\nConfidence: " + confidence + "%");
+
+            }
+        }
+
+        Log.e("TAG",message);
+
+        Intent localIntent = new Intent(ACTION_ACTIVITY_UPDATE);
+        localIntent.putExtra(EXTRA_ACTIVITY_MESSAGE, message);
+        LocalBroadcastManager.getInstance(context).sendBroadcast(localIntent);
+    }
+
+    private String getTransitionType(int transitionType) {
+        switch (transitionType) {
+            case ActivityTransition.ACTIVITY_TRANSITION_ENTER:
+                return "ENTER";
+            case ActivityTransition.ACTIVITY_TRANSITION_EXIT:
+                return "EXIT";
+            default:
+                return "UNKNOWN";
         }
     }
 

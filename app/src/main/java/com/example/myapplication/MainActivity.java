@@ -20,12 +20,16 @@ import androidx.core.content.PermissionChecker;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.google.android.gms.location.ActivityRecognition;
 import com.google.android.gms.location.ActivityRecognitionResult;
 import com.google.android.gms.location.ActivityTransition;
 import com.google.android.gms.location.ActivityTransitionRequest;
 import com.google.android.gms.location.DetectedActivity;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.Task;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +40,10 @@ public class MainActivity extends AppCompatActivity {
     TextView activityText;
 
     private ActivityRecognitionReceiver receiver;
+
+    private boolean runningQOrLater = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q;
+
+    private BroadcastReceiver activityUpdateReceiver;
 
 
     @Override
@@ -51,6 +59,9 @@ public class MainActivity extends AppCompatActivity {
 
         getActivityRequest = findViewById(R.id.getActivityRequest);
         activityText = findViewById(R.id.activity_text);
+        receiver = new ActivityRecognitionReceiver();
+        registerReceiver(receiver, new IntentFilter("ACTIVITY_RECOGNITION_DATA"));
+
 
 
         getActivityRequest.setOnClickListener(view -> {
@@ -59,7 +70,7 @@ public class MainActivity extends AppCompatActivity {
             String[] background = {Manifest.permission.ACCESS_BACKGROUND_LOCATION};
 
 
-            boolean perm1 = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) == PermissionChecker.PERMISSION_DENIED;
+            boolean perm1 = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) == PermissionChecker.PERMISSION_DENIED && runningQOrLater;
             boolean perm2 = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PermissionChecker.PERMISSION_DENIED;
             boolean perm3 = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PermissionChecker.PERMISSION_DENIED;
             boolean perm4 = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PermissionChecker.PERMISSION_DENIED;
@@ -74,30 +85,92 @@ public class MainActivity extends AppCompatActivity {
             } else if (perm1) {
                 Log.e("tag", "1");
                 ActivityCompat.requestPermissions(this, activity, 100);
-            }else{
-                Log.e("TAG","permission ok");
+            } else {
+                Log.e("TAG", "permission ok");
 
-                receiver = new ActivityRecognitionReceiver();
-                registerReceiver(receiver, new IntentFilter("ACTIVITY_RECOGNITION_DATA"));
 
                 requestActivityRecognitionUpdates();
             }
 
         });
+
+        activityUpdateReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent.getAction().equals(ActivityRecognitionReceiver.ACTION_ACTIVITY_UPDATE)) {
+                    String message = intent.getStringExtra(ActivityRecognitionReceiver.EXTRA_ACTIVITY_MESSAGE);
+                    activityText.setText(message);
+                }
+            }
+        };
+    }
+
+        @Override
+    protected void onResume() {
+        super.onResume();
+        // Register the local broadcast receiver
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                activityUpdateReceiver,
+                new IntentFilter(ActivityRecognitionReceiver.ACTION_ACTIVITY_UPDATE)
+        );
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Unregister the local broadcast receiver
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(activityUpdateReceiver);
+    }
+
+    private ActivityTransitionRequest setTransistor() {
+        List<ActivityTransition> transitions = new ArrayList<>();
+
+        transitions.add(new ActivityTransition.Builder()
+                .setActivityType(DetectedActivity.WALKING)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                .build());
+        transitions.add(new ActivityTransition.Builder()
+                .setActivityType(DetectedActivity.WALKING)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
+                .build());
+        transitions.add(new ActivityTransition.Builder()
+                .setActivityType(DetectedActivity.STILL)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                .build());
+        transitions.add(new ActivityTransition.Builder()
+                .setActivityType(DetectedActivity.STILL)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
+                .build());
+
+
+        return new ActivityTransitionRequest(transitions);
+
+
     }
 
     private void requestActivityRecognitionUpdates() {
-        Intent intent = new Intent(this, ActivityRecognitionReceiver.class);
-        PendingIntent pendingIntent = PendingIntent.getBroadcast(this, 550, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Intent transitionIntent = new Intent(this, ActivityRecognitionReceiver.class);
+        transitionIntent.setAction("ACTIVITY_TRANSITION_ACTION");
+        PendingIntent transitionPendingIntent = PendingIntent.getBroadcast(this, 0, transitionIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
+
+        Intent recognitionIntent = new Intent(this, ActivityRecognitionReceiver.class);
+        recognitionIntent.setAction("ACTIVITY_RECOGNITION_ACTION");
+        PendingIntent recognitionPendingIntent = PendingIntent.getBroadcast(this, 1, recognitionIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
-         Log.e("TAG","permission error");
+            Log.e("TAG", "permission error");
             return;
         }
 
-        ActivityRecognition.getClient(this).requestActivityUpdates(3000, pendingIntent);
+        ActivityRecognition.getClient(this)
+                .requestActivityTransitionUpdates(setTransistor(), transitionPendingIntent)
+                .addOnSuccessListener(result -> Log.e("TEST", "Activity transition update request successful"))
+                .addOnFailureListener(e -> Log.e("TEST", "Failed to request activity transition updates", e));
 
-        Log.e("TEST","---->");
+        ActivityRecognition.getClient(this)
+                .requestActivityUpdates(5000, recognitionPendingIntent)
+                .addOnSuccessListener(result -> Log.e("TEST", "Activity recognition update request successful"))
+                .addOnFailureListener(e -> Log.e("TEST", "Failed to request activity recognition updates", e));
     }
 
 }

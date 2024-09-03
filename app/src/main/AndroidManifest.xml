@@ -36,7 +36,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <receiver android:name=".ActivityRecognitionReceiver" android:exported="true" />
+
+        <receiver android:name=".ActivityRecognitionReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="ACTIVITY_TRANSITION_ACTION" />
+                <action android:name="ACTIVITY_RECOGNITION_ACTION" />
+            </intent-filter>
+        </receiver>
+
+
     </application>
 
 </manifest>
